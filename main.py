@@ -4,7 +4,6 @@ import os
 import time
 import threading
 import re
-import base64
 
 TOKEN = "8772869279:AAHuxhvC6kpeEjsjspUjtbBvIXkmp9Z54iQ"
 ADMIN_ID = 8758830915
@@ -38,15 +37,7 @@ def save_users():
     with lock:
         json.dump(list(users_db), open(USERS_FILE, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
 
-# ---------------- ENCODE ---------------- #
-
-def encode_name(text):
-    return base64.urlsafe_b64encode(text.encode()).decode()
-
-def decode_name(text):
-    return base64.urlsafe_b64decode(text.encode()).decode()
-
-# ---------------- SERIES NAME ---------------- #
+# ---------------- SERIES NAME FROM CAPTION ---------------- #
 
 def normalize(t):
     return str(t).lower().replace(" ", "").replace("-", "").replace("_", "")
@@ -61,13 +52,13 @@ def get_series_name(caption):
 
     return normalize(text.strip())
 
-# ---------------- COPY MESSAGE SYSTEM ---------------- #
+# ---------------- COPY MESSAGE SEND (FAST) ---------------- #
 
-def send_all(cid, series_name):
-    if series_name not in files_db:
+def send_all(cid, series_id):
+    if series_id not in files_db:
         return bot.send_message(cid, "❌ Not Found")
 
-    episodes = files_db[series_name]
+    episodes = files_db[series_id]["episodes"]
 
     sent = []
 
@@ -82,7 +73,7 @@ def send_all(cid, series_name):
         except:
             pass
 
-    bot.send_message(cid, f"🎬 Copied {len(sent)} Episodes")
+    bot.send_message(cid, f"🎬 Sent {len(sent)} Episodes")
 
 # ---------------- BACKUP SYSTEM ---------------- #
 
@@ -137,12 +128,9 @@ def start(message):
     if len(args) > 1:
         key = args[1]
 
-        if key.startswith("series_"):
-            try:
-                series_name = decode_name(key.replace("series_", ""))
-                return send_all(cid, series_name)
-            except:
-                return bot.send_message(cid, "❌ Invalid Link")
+        # SAFE LINK MODE (no encode)
+        if key in files_db:
+            return send_all(cid, key)
 
     bot.send_message(cid, "🎬 Send Anime Name or Click Link")
 
@@ -162,12 +150,15 @@ def upload(message):
     elif message.audio:
         name = caption or "audio"
 
-    series_name = get_series_name(caption)
+    series_id = get_series_name(caption)
 
-    if series_name not in files_db:
-        files_db[series_name] = []
+    if series_id not in files_db:
+        files_db[series_id] = {
+            "name": caption,
+            "episodes": []
+        }
 
-    files_db[series_name].append({
+    files_db[series_id]["episodes"].append({
         "chat_id": message.chat.id,
         "message_id": message.message_id,
         "name": name
@@ -175,9 +166,7 @@ def upload(message):
 
     save_files()
 
-    encoded = encode_name(series_name)
-
-    link = f"https://t.me/{bot.get_me().username}?start=series_{encoded}"
+    link = f"https://t.me/{bot.get_me().username}?start={series_id}"
 
     bot.send_message(message.chat.id, f"🎬 All Episodes Link:\n{link}")
 
