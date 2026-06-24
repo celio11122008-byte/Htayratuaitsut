@@ -304,17 +304,33 @@ def start(message):
                 or normalize(data["name"]) in keyword
             ]
 
-            if matched_files:
-    matched_files.sort(
-        key=lambda x: get_episode_number(x["name"])
+            # Start with anime link
+if len(args) > 1:
+    try:
+        keyword = normalize(decode_data(args[1]))
+    except Exception:
+        return bot.send_message(
+            chat_id,
+            "❌ Invalid Anime Link"
+        )
+
+    matched_files = [
+        data for data in files_db.values()
+        if keyword in normalize(data["name"])
+        or normalize(data["name"]) in keyword
+    ]
+
+    if matched_files:
+        matched_files.sort(
+            key=lambda x: get_episode_number(x["name"])
+        )
+
+        return fast_send(chat_id, matched_files)
+
+    return bot.send_message(
+        chat_id,
+        "❌ Anime Not Found"
     )
-
-    return fast_send(chat_id, matched_files)
-
-            return bot.send_message(
-                chat_id,
-                "❌ Anime Not Found"
-            )
 
         # Normal start message
         bot.send_message(
