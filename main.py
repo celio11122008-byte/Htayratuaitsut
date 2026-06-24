@@ -208,20 +208,16 @@ def send_single_file(chat_id, data, sent_messages):
 
 def fast_send(chat_id, files):
     sent_messages = []
-    threads = []
+
+    # Sort by name (EP 1, EP 2...)
+    files.sort(key=lambda x: x["name"].lower())
 
     for data in files:
-        thread = threading.Thread(
-            target=send_single_file,
-            args=(chat_id, data, sent_messages)
+        send_single_file(
+            chat_id,
+            data,
+            sent_messages
         )
-
-        thread.start()
-        threads.append(thread)
-
-    # Wait until all files are sent
-    for thread in threads:
-        thread.join()
 
     try:
         warning = bot.send_message(
@@ -235,8 +231,8 @@ def fast_send(chat_id, files):
 (မူပိုင်ခွင့်ပြဿနာများကြောင့်)
 အလိုအလျောက် ဖျက်ပါမည်။
 
-📌 ကျေးဇူးပြု၍ File များကို
-Saved Messages သို့ Forward လုပ်ထားပါ။
+📌 File များကို Saved Messages သို့
+Forward လုပ်ထားပါ။
 """
         )
 
@@ -249,7 +245,7 @@ Saved Messages သို့ Forward လုပ်ထားပါ။
         ).start()
 
     except Exception as e:
-        print(f"Warning Message Error: {e}")
+        print(f"Warning Error: {e}")
         
 # ---------------- START ---------------- #
 
