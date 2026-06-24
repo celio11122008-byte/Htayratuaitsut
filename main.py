@@ -4,18 +4,20 @@ import os
 import time
 import threading
 import re
+import base64
 
 TOKEN = "8772869279:AAHuxhvC6kpeEjsjspUjtbBvIXkmp9Z54iQ"
 ADMIN_ID = 8758830915
-
-MAIN_CHANNEL = "@Burmese_Anime"
 
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
 DB_FILE = "files.json"
 USERS_FILE = "users.json"
+BACKUP_DIR = "backup"
 
 lock = threading.Lock()
+
+# ---------------- LOAD ---------------- #
 
 def load(file, default):
     if os.path.exists(file):
@@ -26,6 +28,8 @@ def load(file, default):
 files_db = load(DB_FILE, {})
 users_db = set(load(USERS_FILE, []))
 
+# ---------------- SAVE ---------------- #
+
 def save_files():
     with lock:
         json.dump(files_db, open(DB_FILE, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
@@ -34,45 +38,90 @@ def save_users():
     with lock:
         json.dump(list(users_db), open(USERS_FILE, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
 
+# ---------------- ENCODE ---------------- #
+
+def encode_name(text):
+    return base64.urlsafe_b64encode(text.encode()).decode()
+
+def decode_name(text):
+    return base64.urlsafe_b64decode(text.encode()).decode()
+
+# ---------------- SERIES NAME ---------------- #
+
 def normalize(t):
     return str(t).lower().replace(" ", "").replace("-", "").replace("_", "")
 
-def get_ep(name):
-    m = re.search(r"(?:ep|episode|e)\s*(\d+)", name.lower())
-    return int(m.group(1)) if m else 999999
+def get_series_name(caption):
+    if not caption:
+        return "unknown"
 
-def send_file(cid, f):
-    try:
-        if f["type"] == "video":
-            return bot.send_video(cid, f["file_id"], caption=f.get("caption",""))
-        elif f["type"] == "document":
-            return bot.send_document(cid, f["file_id"], caption=f.get("caption",""))
-        elif f["type"] == "audio":
-            return bot.send_audio(cid, f["file_id"], caption=f.get("caption",""))
-    except:
-        return None
+    text = caption.lower()
+    text = re.sub(r"(ep|episode|e|s\d+)\s*\d+", "", text)
+    text = re.sub(r"[^a-z0-9 ]", "", text)
 
-def fast_send(cid, files):
+    return normalize(text.strip())
+
+# ---------------- COPY MESSAGE SYSTEM ---------------- #
+
+def send_all(cid, series_name):
+    if series_name not in files_db:
+        return bot.send_message(cid, "❌ Not Found")
+
+    episodes = files_db[series_name]
+
     sent = []
 
-    files = sorted(files, key=lambda x: get_ep(x["name"]))
-
-    def worker(f):
-        msg = send_file(cid, f)
-        if msg:
+    for ep in sorted(episodes, key=lambda x: x["name"]):
+        try:
+            msg = bot.copy_message(
+                chat_id=cid,
+                from_chat_id=ep["chat_id"],
+                message_id=ep["message_id"]
+            )
             sent.append(msg.message_id)
+        except:
+            pass
 
-    threads = []
+    bot.send_message(cid, f"🎬 Copied {len(sent)} Episodes")
 
-    for f in files:
-        t = threading.Thread(target=worker, args=(f,))
-        threads.append(t)
-        t.start()
+# ---------------- BACKUP SYSTEM ---------------- #
 
-    for t in threads:
-        t.join()
+def make_backup():
+    try:
+        if not os.path.exists(BACKUP_DIR):
+            os.makedirs(BACKUP_DIR)
 
-    bot.send_message(cid, f"🎬 Sent {len(sent)} Episodes")
+        ts = time.strftime("%Y%m%d_%H%M%S")
+
+        with open(f"{BACKUP_DIR}/files_{ts}.json", "w", encoding="utf-8") as f:
+            json.dump(files_db, f, indent=2, ensure_ascii=False)
+
+        with open(f"{BACKUP_DIR}/users_{ts}.json", "w", encoding="utf-8") as f:
+            json.dump(list(users_db), f, indent=2, ensure_ascii=False)
+
+        return f"✅ Backup Done: {ts}"
+
+    except Exception as e:
+        return f"❌ Backup Failed: {e}"
+
+def backup_loop():
+    while True:
+        make_backup()
+        time.sleep(300)
+
+threading.Thread(target=backup_loop, daemon=True).start()
+
+# ---------------- /BACKUP COMMAND ---------------- #
+
+@bot.message_handler(commands=['backup'])
+def backup_cmd(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    result = make_backup()
+    bot.send_message(message.chat.id, result)
+
+# ---------------- START ---------------- #
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -89,31 +138,15 @@ def start(message):
         key = args[1]
 
         if key.startswith("series_"):
-            series_id = key.replace("series_", "")
+            try:
+                series_name = decode_name(key.replace("series_", ""))
+                return send_all(cid, series_name)
+            except:
+                return bot.send_message(cid, "❌ Invalid Link")
 
-            if series_id in files_db:
-                base = files_db[series_id]["name"]
+    bot.send_message(cid, "🎬 Send Anime Name or Click Link")
 
-                matched = [
-                    f for f in files_db.values()
-                    if normalize(base) in normalize(f["name"])
-                ]
-
-                return fast_send(cid, matched)
-
-        key = normalize(key)
-
-        matched = [
-            f for f in files_db.values()
-            if key in normalize(f["name"])
-        ]
-
-        if matched:
-            return fast_send(cid, matched)
-
-        return bot.send_message(cid, "Anime Not Found")
-
-    bot.send_message(cid, "🎬 Bot Ready")
+# ---------------- UPLOAD ---------------- #
 
 @bot.message_handler(content_types=['video','document','audio'])
 def upload(message):
@@ -123,40 +156,36 @@ def upload(message):
     caption = message.caption or ""
 
     if message.video:
-        file_id = message.video.file_id
-        ftype = "video"
         name = caption or "video"
-
     elif message.document:
-        file_id = message.document.file_id
-        ftype = "document"
         name = caption or message.document.file_name
-
     elif message.audio:
-        file_id = message.audio.file_id
-        ftype = "audio"
         name = caption or "audio"
 
-    series_id = str(int(time.time()*1000))
+    series_name = get_series_name(caption)
 
-    files_db[series_id] = {
-        "file_id": file_id,
-        "name": name,
-        "type": ftype,
-        "caption": caption
-    }
+    if series_name not in files_db:
+        files_db[series_name] = []
+
+    files_db[series_name].append({
+        "chat_id": message.chat.id,
+        "message_id": message.message_id,
+        "name": name
+    })
 
     save_files()
 
-    link = f"https://t.me/{bot.get_me().username}?start=series_{series_id}"
+    encoded = encode_name(series_name)
 
-    bot.send_message(message.chat.id, f"🎬 All Episodes Sent Link:\n{link}")
+    link = f"https://t.me/{bot.get_me().username}?start=series_{encoded}"
 
-print("Bot Running...")
+    bot.send_message(message.chat.id, f"🎬 All Episodes Link:\n{link}")
+
+print("🚀 Bot Running...")
 
 while True:
     try:
-        bot.infinity_polling(skip_pending=True, timeout=20)
+        bot.infinity_polling(skip_pending=True)
     except Exception as e:
-        print("Restarting:", e)
+        print("Restarting bot:", e)
         time.sleep(3)
