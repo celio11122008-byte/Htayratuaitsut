@@ -43,21 +43,21 @@ def make_backup():
         if not os.path.exists(BACKUP_DIR):
             os.makedirs(BACKUP_DIR)
 
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        ts = time.strftime("%Y%m%d_%H%M%S")
 
         if os.path.exists(DB_FILE):
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 data = f.read()
-            with open(f"{BACKUP_DIR}/files_{timestamp}.json", "w", encoding="utf-8") as f:
+            with open(f"{BACKUP_DIR}/files_{ts}.json", "w", encoding="utf-8") as f:
                 f.write(data)
 
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, "r", encoding="utf-8") as f:
                 data = f.read()
-            with open(f"{BACKUP_DIR}/users_{timestamp}.json", "w", encoding="utf-8") as f:
+            with open(f"{BACKUP_DIR}/users_{ts}.json", "w", encoding="utf-8") as f:
                 f.write(data)
 
-        print("Backup created:", timestamp)
+        print("Backup created:", ts)
 
     except Exception as e:
         print("Backup error:", e)
@@ -101,6 +101,7 @@ def auto_delete(cid, ids):
 
 def send_all_episodes(cid, files):
     sent = []
+
     files = sorted(files, key=lambda x: get_ep(x["name"]))
 
     for f in files:
@@ -110,7 +111,10 @@ def send_all_episodes(cid, files):
         except:
             pass
 
-    warn = bot.send_message(cid, f"Sent {len(sent)} Episodes\nAuto delete in 5 min")
+    warn = bot.send_message(
+        cid,
+        f"Sent {len(sent)} Episodes\nAuto delete in 5 min"
+    )
     sent.append(warn.message_id)
 
     threading.Thread(target=auto_delete, args=(cid, sent), daemon=True).start()
@@ -135,7 +139,11 @@ def start(message):
         if key.startswith("id_"):
             anime_id = key.replace("id_", "")
             if anime_id in files_db:
-                return send_all_episodes(cid, [files_db[anime_id]])
+                matched = [
+                    f for f in files_db.values()
+                    if normalize(f["name"]) in normalize(files_db[anime_id]["name"])
+                ]
+                return send_all_episodes(cid, matched)
 
         key = normalize(key)
 
@@ -184,19 +192,13 @@ def upload(message):
 
     save_files()
 
-    link = f"https://t.me/{bot.get_me().username}?start=id_{file_key}"
-
-    bot.send_message(message.chat.id, f"Anime Link:\n{link}")
+    bot.send_message(message.chat.id, "All Episodes Saved Successfully")
 
 print("Bot Running...")
 
 while True:
     try:
-        bot.infinity_polling(
-            skip_pending=True,
-            timeout=20,
-            long_polling_timeout=20
-        )
+        bot.infinity_polling(skip_pending=True)
     except Exception as e:
         print("Restarting bot:", e)
         time.sleep(5)
