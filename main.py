@@ -225,40 +225,33 @@ def get_episode_number(name):
 def fast_send(chat_id, files):
     sent_messages = []
 
-    # EP Number အလိုက်စီ
-    files = sorted(
-        files,
-        key=lambda x: get_episode_number(x["name"])
-    )
+    try:
+        # EP Number အလိုက်စီ
+        files = sorted(
+            files,
+            key=lambda x: get_episode_number(x["name"])
+        )
 
-    for data in files:
-        try:
+        # Delay မထားဘဲ တစ်ခုချင်းအမြန်ပို့
+        for data in files:
             send_single_file(
                 chat_id,
                 data,
                 sent_messages
             )
 
-            # Fast but keep order
-            time.sleep(0.03)
-
-        except Exception as e:
-            print(f"Send Error: {e}")
-
-    try:
+        # Success Message
         warning = bot.send_message(
             chat_id,
             f"""
-✅ {len(sent_messages)} File Sent Successfully
+✅ {len(sent_messages)} Episodes Sent Successfully
 
 🎬 Thank You For Using Our Anime Bot
 
 ⚠️ 5 မိနစ်ကြာရင်
-(မူပိုင်ခွင့်ပြဿနာများကြောင့်)
-အလိုအလျောက် ဖျက်ပါမည်။
+File များကို အလိုအလျောက် ဖျက်ပါမည်။
 
-📌 ကျေးဇူးပြု၍ File များကို
-Saved Messages သို့ Forward လုပ်ထားပါ။
+📌 Saved Messages သို့ Forward လုပ်ထားပါ။
 """
         )
 
@@ -266,15 +259,19 @@ Saved Messages သို့ Forward လုပ်ထားပါ။
             warning.message_id
         )
 
+        # Auto Delete Thread
         threading.Thread(
             target=auto_delete,
-            args=(chat_id, sent_messages),
+            args=(
+                chat_id,
+                sent_messages
+            ),
             daemon=True
         ).start()
 
     except Exception as e:
         print(
-            f"Warning Error: {e}"
+            f"Fast Send Error: {e}"
         )
         
 # ---------------- START ---------------- #
