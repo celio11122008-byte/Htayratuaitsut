@@ -5,8 +5,6 @@ import time
 import threading
 import re
 
-# ---------------- CONFIG ---------------- #
-
 TOKEN = "8772869279:AAHo18Q2T_UohwQSE-wj1EXfpo66O2_Zk84"
 ADMIN_ID = 8758830915
 
@@ -19,8 +17,6 @@ DB_FILE = "files.json"
 USERS_FILE = "users.json"
 
 lock = threading.Lock()
-
-# ---------------- LOAD ---------------- #
 
 def load(file, default):
     if os.path.exists(file):
@@ -41,8 +37,6 @@ def save_users():
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(list(users_db), f, indent=2, ensure_ascii=False)
 
-# ---------------- HELPERS ---------------- #
-
 def normalize(t):
     return str(t).lower().replace(" ", "").replace("-", "").replace("_", "")
 
@@ -50,16 +44,12 @@ def get_ep(name):
     m = re.search(r"(?:ep|episode|e)\s*(\d+)", name.lower())
     return int(m.group(1)) if m else 999999
 
-# ---------------- CHANNEL CHECK ---------------- #
-
 def is_joined(uid):
     try:
         m = bot.get_chat_member(MAIN_CHANNEL, uid)
         return m.status in ["member", "creator", "administrator"]
     except:
         return False
-
-# ---------------- FAST SEND ---------------- #
 
 def send_file(cid, f):
     if f["type"] == "video":
@@ -69,9 +59,16 @@ def send_file(cid, f):
     elif f["type"] == "audio":
         return bot.send_audio(cid, f["file_id"], caption=f.get("caption",""))
 
-def fast_send(cid, files):
-    sent = []
+def auto_delete(cid, ids):
+    time.sleep(300)
+    for i in ids:
+        try:
+            bot.delete_message(cid, i)
+        except:
+            pass
 
+def send_all_episodes(cid, files):
+    sent = []
     files = sorted(files, key=lambda x: get_ep(x["name"]))
 
     for f in files:
@@ -81,20 +78,10 @@ def fast_send(cid, files):
         except:
             pass
 
-    warn = bot.send_message(cid, f"✅ Sent {len(sent)} episodes\n⏳ Auto delete in 5 min")
+    warn = bot.send_message(cid, f"Sent {len(sent)} Episodes\nAuto delete in 5 min")
     sent.append(warn.message_id)
 
     threading.Thread(target=auto_delete, args=(cid, sent), daemon=True).start()
-
-def auto_delete(cid, ids):
-    time.sleep(300)
-    for i in ids:
-        try:
-            bot.delete_message(cid, i)
-        except:
-            pass
-
-# ---------------- START ---------------- #
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -106,32 +93,31 @@ def start(message):
         save_users()
 
     if not is_joined(uid):
-        return bot.send_message(cid, "❌ Join channel first")
+        return bot.send_message(cid, "Please join channel first")
 
     args = message.text.split(maxsplit=1)
 
-    # SHORT LINK SYSTEM
     if len(args) > 1:
         key = args[1]
 
-        # ID SYSTEM (BEST)
         if key.startswith("id_"):
             anime_id = key.replace("id_", "")
             if anime_id in files_db:
-                return fast_send(cid, [files_db[anime_id]])
+                return send_all_episodes(cid, [files_db[anime_id]])
 
-        # NAME SEARCH SYSTEM
         key = normalize(key)
-        matched = [f for f in files_db.values() if key in normalize(f["name"])]
+
+        matched = [
+            f for f in files_db.values()
+            if key in normalize(f["name"])
+        ]
 
         if matched:
-            return fast_send(cid, matched)
+            return send_all_episodes(cid, matched)
 
-        return bot.send_message(cid, "❌ Not found")
+        return bot.send_message(cid, "Anime Not Found")
 
-    bot.send_message(cid, "🎬 Anime Bot Ready")
-
-# ---------------- UPLOAD ---------------- #
+    bot.send_message(cid, "Anime Bot Ready")
 
 @bot.message_handler(content_types=['video','document','audio'])
 def upload(message):
@@ -155,9 +141,9 @@ def upload(message):
         ftype = "audio"
         name = caption or "audio"
 
-    file_id_key = str(int(time.time()*1000))
+    file_key = str(int(time.time()*1000))
 
-    files_db[file_id_key] = {
+    files_db[file_key] = {
         "file_id": file_id,
         "name": name,
         "type": ftype,
@@ -166,12 +152,9 @@ def upload(message):
 
     save_files()
 
-    # 🔥 SHORT LINK (IMPORTANT FIX)
-    link = f"https://t.me/{bot.get_me().username}?start=id_{file_id_key}"
+    link = f"https://t.me/{bot.get_me().username}?start=id_{file_key}"
 
-    bot.send_message(message.chat.id, f"🔗 {link}")
-
-# ---------------- RUN (ANTI 409 SAFE) ---------------- #
+    bot.send_message(message.chat.id, f"Anime Link:\n{link}")
 
 print("Bot Running...")
 
@@ -183,5 +166,5 @@ while True:
             long_polling_timeout=20
         )
     except Exception as e:
-        print("Restart:", e)
+        print("Restarting bot:", e)
         time.sleep(5)
