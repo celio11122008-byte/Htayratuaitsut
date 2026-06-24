@@ -66,7 +66,22 @@ def encode_data(text):
 def get_episode_number(name):
     name = str(name).lower()
 
-    match = re.search(r'(?:ep|episode|e)\s*0*(\d+)', name)
+    # -------------------------
+    # 1. Season + Episode (BEST PRIORITY)
+    # -------------------------
+    match = re.search(
+        r'season\s*0*(\d+).*?(ep|episode)\s*-?\s*0*(\d+)',
+        name
+    )
+    if match:
+        season = int(match.group(1))
+        ep = int(match.group(3))
+        return season * 10000 + ep   # S2E8 -> 20008
+
+    # -------------------------
+    # 2. Episode only
+    # -------------------------
+    match = re.search(r'\b(?:ep|episode|e)\s*-?\s*0*(\d+)\b', name)
     if match:
         return int(match.group(1))
 
