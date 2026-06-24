@@ -19,7 +19,7 @@ ADMIN_ID = 8758830915
 bot = telebot.TeleBot(
     TOKEN,
     threaded=True,
-    num_threads=10
+    num_threads=30
 )
 
 
@@ -221,18 +221,14 @@ def get_episode_number(name):
 
     return 999999
 
-
 def fast_send(chat_id, files):
     sent_messages = []
 
     try:
-        # EP Number အလိုက်စီ
-        files = sorted(
-            files,
+        files.sort(
             key=lambda x: get_episode_number(x["name"])
         )
 
-        # Delay မထားဘဲ တစ်ခုချင်းအမြန်ပို့
         for data in files:
             send_single_file(
                 chat_id,
@@ -240,39 +236,25 @@ def fast_send(chat_id, files):
                 sent_messages
             )
 
-        # Success Message
         warning = bot.send_message(
             chat_id,
             f"""
 ✅ {len(sent_messages)} Episodes Sent Successfully
 
-🎬 Thank You For Using Our Anime Bot
-
-⚠️ 5 မိနစ်ကြာရင်
-File များကို အလိုအလျောက် ဖျက်ပါမည်။
-
-📌 Saved Messages သို့ Forward လုပ်ထားပါ။
+⚠️ Files will auto delete after 5 minutes.
 """
         )
 
-        sent_messages.append(
-            warning.message_id
-        )
+        sent_messages.append(warning.message_id)
 
-        # Auto Delete Thread
         threading.Thread(
             target=auto_delete,
-            args=(
-                chat_id,
-                sent_messages
-            ),
+            args=(chat_id, sent_messages),
             daemon=True
         ).start()
 
     except Exception as e:
-        print(
-            f"Fast Send Error: {e}"
-        )
+        print(f"Fast Send Error: {e}")
         
 # ---------------- START ---------------- #
 
