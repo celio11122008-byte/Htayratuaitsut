@@ -4,11 +4,11 @@ import os
 import time
 import threading
 import re
+import base64
 
-TOKEN = "8772869279:AAHo18Q2T_UohwQSE-wj1EXfpo66O2_Zk84"
+TOKEN = "8772869279:AAHuxhvC6kpeEjsjspUjtbBvIXkmp9Z54iQ"
 ADMIN_ID = 8758830915
 
-UPLOAD_CHANNEL = "@tuukqutwulsiliysiluysgksilut"
 MAIN_CHANNEL = "@Burmese_Anime"
 
 bot = telebot.TeleBot(TOKEN)
@@ -38,6 +38,12 @@ def save_users():
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(list(users_db), f, indent=2, ensure_ascii=False)
 
+def encode_data(text):
+    return base64.urlsafe_b64encode(text.encode()).decode()
+
+def decode_data(text):
+    return base64.urlsafe_b64decode(text.encode()).decode()
+
 def make_backup():
     try:
         if not os.path.exists(BACKUP_DIR):
@@ -47,15 +53,11 @@ def make_backup():
 
         if os.path.exists(DB_FILE):
             with open(DB_FILE, "r", encoding="utf-8") as f:
-                data = f.read()
-            with open(f"{BACKUP_DIR}/files_{ts}.json", "w", encoding="utf-8") as f:
-                f.write(data)
+                open(f"{BACKUP_DIR}/files_{ts}.json", "w", encoding="utf-8").write(f.read())
 
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, "r", encoding="utf-8") as f:
-                data = f.read()
-            with open(f"{BACKUP_DIR}/users_{ts}.json", "w", encoding="utf-8") as f:
-                f.write(data)
+                open(f"{BACKUP_DIR}/users_{ts}.json", "w", encoding="utf-8").write(f.read())
 
         print("Backup created:", ts)
 
@@ -111,10 +113,7 @@ def send_all_episodes(cid, files):
         except:
             pass
 
-    warn = bot.send_message(
-        cid,
-        f"Sent {len(sent)} Episodes\nAuto delete in 5 min"
-    )
+    warn = bot.send_message(cid, f"Sent {len(sent)} Episodes\nAuto delete in 5 min")
     sent.append(warn.message_id)
 
     threading.Thread(target=auto_delete, args=(cid, sent), daemon=True).start()
@@ -136,14 +135,22 @@ def start(message):
     if len(args) > 1:
         key = args[1]
 
-        if key.startswith("id_"):
-            anime_id = key.replace("id_", "")
-            if anime_id in files_db:
-                matched = [
-                    f for f in files_db.values()
-                    if normalize(f["name"]) in normalize(files_db[anime_id]["name"])
-                ]
-                return send_all_episodes(cid, matched)
+        if key.startswith("series_"):
+            try:
+                series_id = decode_data(key.replace("series_", ""))
+
+                if series_id in files_db:
+                    base = files_db[series_id]["name"]
+
+                    matched = [
+                        f for f in files_db.values()
+                        if normalize(base) in normalize(f["name"])
+                    ]
+
+                    return send_all_episodes(cid, matched)
+
+            except:
+                return bot.send_message(cid, "Invalid Link")
 
         key = normalize(key)
 
@@ -192,7 +199,11 @@ def upload(message):
 
     save_files()
 
-    bot.send_message(message.chat.id, "All Episodes Saved Successfully")
+    encoded = encode_data(file_key)
+
+    link = f"https://t.me/{bot.get_me().username}?start=series_{encoded}"
+
+    bot.send_message(message.chat.id, f"All Episodes Link:\n{link}")
 
 print("Bot Running...")
 
