@@ -88,16 +88,25 @@ def save_users():
 
 def get_episode_number(name):
     try:
+        name = str(name).lower()
+
+        # EP 1, Episode 1, E01
         match = re.search(
-            r'(?:ep|episode)\s*(\d+)',
-            name.lower()
+            r'(?:ep|episode|e)\s*0*(\d+)',
+            name
         )
 
         if match:
             return int(match.group(1))
 
-    except Exception:
-        pass
+        # Any number like 01, 02, 10
+        match = re.search(r'\b0*(\d+)\b', name)
+
+        if match:
+            return int(match.group(1))
+
+    except Exception as e:
+        print(f"Episode Sort Error: {e}")
 
     return 999999
 
