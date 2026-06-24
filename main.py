@@ -11,7 +11,7 @@ import re
 
 # ---------------- CONFIG ---------------- #
 
-TOKEN = "8772869279:AAEu5CEhxUGxOcrv_btL1RqNDmnSMbL6U3Y"
+TOKEN = "8772869279:AAGubBxoOeB2NI6zke8YbuYGDGZ4_9ibLE0"
 ADMIN_ID = 8758830915
 
 
@@ -271,32 +271,30 @@ Saved Messages သို့ Forward လုပ်ထားပါ။
 
 @bot.message_handler(commands=['start'])
 def start(message):
-
     try:
         user_id = message.from_user.id
         chat_id = message.chat.id
 
-        # Track new users only
         if user_id not in users_db:
             users_db.add(user_id)
             save_users()
 
-        # Check channel join
         if not is_joined(user_id):
             join_message(chat_id)
             return
 
         args = message.text.split(maxsplit=1)
 
-        # Start with anime link
         if len(args) > 1:
-            try:
-                keyword = normalize(decode_data(args[1]))
-            except Exception:
+            decoded = decode_data(args[1])
+
+            if not decoded:
                 return bot.send_message(
                     chat_id,
                     "❌ Invalid Anime Link"
                 )
+
+            keyword = normalize(decoded)
 
             matched_files = [
                 data for data in files_db.values()
@@ -304,35 +302,18 @@ def start(message):
                 or normalize(data["name"]) in keyword
             ]
 
-            # Start with anime link
-if len(args) > 1:
-    try:
-        keyword = normalize(decode_data(args[1]))
-    except Exception:
-        return bot.send_message(
-            chat_id,
-            "❌ Invalid Anime Link"
-        )
+            if matched_files:
+                matched_files.sort(
+                    key=lambda x: get_episode_number(x["name"])
+                )
 
-    matched_files = [
-        data for data in files_db.values()
-        if keyword in normalize(data["name"])
-        or normalize(data["name"]) in keyword
-    ]
+                return fast_send(chat_id, matched_files)
 
-    if matched_files:
-        matched_files.sort(
-            key=lambda x: get_episode_number(x["name"])
-        )
+            return bot.send_message(
+                chat_id,
+                "❌ Anime Not Found"
+            )
 
-        return fast_send(chat_id, matched_files)
-
-    return bot.send_message(
-        chat_id,
-        "❌ Anime Not Found"
-    )
-
-        # Normal start message
         bot.send_message(
             chat_id,
             f"""
@@ -352,9 +333,10 @@ if len(args) > 1:
 
     except Exception as e:
         print(f"Start Error: {e}")
+
         bot.send_message(
-            message.chat.id,
-            "❌ Something went wrong. Please try again."
+            chat_id,
+            "❌ Something went wrong."
         )
 
 # ---------------- UPLOAD ---------------- #
