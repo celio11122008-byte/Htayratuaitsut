@@ -16,6 +16,7 @@ bot = telebot.TeleBot(TOKEN)
 DB_FILE = "files.json"
 USERS_FILE = "users.json"
 
+BACKUP_DIR = "backup"
 lock = threading.Lock()
 
 def load(file, default):
@@ -36,6 +37,37 @@ def save_users():
     with lock:
         with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(list(users_db), f, indent=2, ensure_ascii=False)
+
+def make_backup():
+    try:
+        if not os.path.exists(BACKUP_DIR):
+            os.makedirs(BACKUP_DIR)
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                data = f.read()
+            with open(f"{BACKUP_DIR}/files_{timestamp}.json", "w", encoding="utf-8") as f:
+                f.write(data)
+
+        if os.path.exists(USERS_FILE):
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
+                data = f.read()
+            with open(f"{BACKUP_DIR}/users_{timestamp}.json", "w", encoding="utf-8") as f:
+                f.write(data)
+
+        print("Backup created:", timestamp)
+
+    except Exception as e:
+        print("Backup error:", e)
+
+def backup_loop():
+    while True:
+        make_backup()
+        time.sleep(600)
+
+threading.Thread(target=backup_loop, daemon=True).start()
 
 def normalize(t):
     return str(t).lower().replace(" ", "").replace("-", "").replace("_", "")
