@@ -1,51 +1,47 @@
 import telebot
 import json
 import os
-import base64
 import time
 import threading
 import re
 
 # ---------------- CONFIG ---------------- #
 
-TOKEN = "8772869279:AAGubBxoOeB2NI6zke8YbuYGDGZ4_9ibLE0"
+TOKEN = "8772869279:AAFzl85BO2442slN0fEc8P8S6YxjDl_mZN8"
 ADMIN_ID = 8758830915
 
-bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=10)
+UPLOAD_CHANNEL = "tuukqutwulsiliysiluysgksilut"
+MAIN_CHANNEL = "@Burmese_Anime"
+
+bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=30)
 
 DB_FILE = "files.json"
-USERS_DB_FILE = "users.json"
-
-CHANNEL_USERNAME = "@Burmese_Anime"
-CHANNEL_LINK = "https://t.me/Burmese_Anime"
+USERS_FILE = "users.json"
 
 db_lock = threading.Lock()
 
 # ---------------- LOAD DB ---------------- #
 
-def load_json(path, default):
-    try:
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except:
-        pass
+def load(file, default):
+    if os.path.exists(file):
+        with open(file, "r", encoding="utf-8") as f:
+            return json.load(f)
     return default
 
 
-files_db = load_json(DB_FILE, {})
-users_db = set(load_json(USERS_DB_FILE, []))
+files_db = load(DB_FILE, {})
+users_db = set(load(USERS_FILE, []))
 
-# ---------------- SAVE ---------------- #
 
-def save_files():
+def save_db():
     with db_lock:
         with open(DB_FILE, "w", encoding="utf-8") as f:
             json.dump(files_db, f, indent=4, ensure_ascii=False)
 
+
 def save_users():
     with db_lock:
-        with open(USERS_DB_FILE, "w", encoding="utf-8") as f:
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
             json.dump(list(users_db), f, indent=4, ensure_ascii=False)
 
 # ---------------- HELPERS ---------------- #
@@ -53,191 +49,155 @@ def save_users():
 def normalize(text):
     return str(text).lower().replace(" ", "").replace("-", "").replace("_", "")
 
-def decode_data(text):
-    try:
-        return base64.urlsafe_b64decode(text.encode()).decode()
-    except:
-        return None
 
-def encode_data(text):
-    return base64.urlsafe_b64encode(text.encode()).decode()
+def get_ep(name):
+    m = re.search(r'(?:ep|episode|e)\s*(\d+)', name.lower())
+    return int(m.group(1)) if m else 999999
 
-# ✅ SAFE EPISODE SORT (IMPORTANT FIX)
-def get_episode_number(name):
-    name = str(name).lower()
-
-    # -------------------------
-    # 1. Season + Episode (BEST PRIORITY)
-    # -------------------------
-    match = re.search(
-        r'season\s*0*(\d+).*?(ep|episode)\s*-?\s*0*(\d+)',
-        name
-    )
-    if match:
-        season = int(match.group(1))
-        ep = int(match.group(3))
-        return season * 10000 + ep   # S2E8 -> 20008
-
-    # -------------------------
-    # 2. Episode only
-    # -------------------------
-    match = re.search(r'\b(?:ep|episode|e)\s*-?\s*0*(\d+)\b', name)
-    if match:
-        return int(match.group(1))
-
-    return 999999
-
-# ---------------- CHANNEL CHECK ---------------- #
+# ---------------- FORCE JOIN (MAIN CHANNEL) ---------------- #
 
 def is_joined(user_id):
     try:
-        m = bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        return m.status in ["member", "administrator", "creator"]
+        m = bot.get_chat_member(MAIN_CHANNEL, user_id)
+        return m.status in ["creator", "administrator", "member"]
     except:
         return False
 
-def join_message(chat_id):
-    bot.send_message(
-        chat_id,
-        "❌ Please join channel first:\n" + CHANNEL_LINK
+
+def join_msg(chat_id):
+    kb = telebot.types.InlineKeyboardMarkup()
+    kb.add(
+        telebot.types.InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{MAIN_CHANNEL.replace('@','')}")
     )
 
-# ---------------- SEND FILE ---------------- #
+    bot.send_message(
+        chat_id,
+        "❌ Please join channel first",
+        reply_markup=kb
+    )
 
-def send_single(chat_id, data, out):
+# ---------------- AUTO DELETE ---------------- #
+
+def auto_delete(chat_id, ids):
+    time.sleep(300)
+    for i in ids:
+        try:
+            bot.delete_message(chat_id, i)
+        except:
+            pass
+
+# ---------------- SEND SINGLE (COPY MESSAGE) ---------------- #
+
+def send_single(chat_id, data, sent):
     try:
-        msg = None
-
-        if data["type"] == "document":
-            msg = bot.send_document(chat_id, data["file_id"], caption=data.get("caption",""))
-
-        elif data["type"] == "video":
-            msg = bot.send_video(chat_id, data["file_id"], caption=data.get("caption",""), supports_streaming=True)
-
-        elif data["type"] == "audio":
-            msg = bot.send_audio(chat_id, data["file_id"], caption=data.get("caption",""))
-
-        if msg:
-            out.append(msg.message_id)
+        msg = bot.copy_message(
+            chat_id=chat_id,
+            from_chat_id=data["channel"],
+            message_id=data["message_id"]
+        )
+        sent.append(msg.message_id)
 
     except Exception as e:
-        print("SEND ERROR:", e)
+        print("Copy Error:", e)
+
+# ---------------- FAST SEND ---------------- #
 
 def fast_send(chat_id, files):
     sent = []
-    threads = []
+
+    files = sorted(files, key=lambda x: get_ep(x["name"]))
 
     for f in files:
-        t = threading.Thread(target=send_single, args=(chat_id, f, sent))
-        t.start()
-        threads.append(t)
+        send_single(chat_id, f, sent)
 
-    for t in threads:
-        t.join()
+    warn = bot.send_message(chat_id, f"✅ Sent {len(sent)} Episodes")
+    sent.append(warn.message_id)
 
-    bot.send_message(chat_id, f"✅ Sent {len(sent)} files")
+    threading.Thread(target=auto_delete, args=(chat_id, sent), daemon=True).start()
 
 # ---------------- START ---------------- #
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    try:
-        user_id = message.from_user.id
-        chat_id = message.chat.id
+@bot.message_handler(commands=["start"])
+def start(msg):
+    uid = msg.from_user.id
+    chat_id = msg.chat.id
 
-        users_db.add(user_id)
+    if uid not in users_db:
+        users_db.add(uid)
         save_users()
 
-        if not is_joined(user_id):
-            join_message(chat_id)
-            return
+    # FORCE JOIN MAIN CHANNEL
+    if not is_joined(uid):
+        return join_msg(chat_id)
 
-        args = message.text.split(maxsplit=1)
+    args = msg.text.split(maxsplit=1)
 
-        # ---------------- SEARCH MODE ---------------- #
-        if len(args) > 1:
-            decoded = decode_data(args[1])
+    if len(args) > 1:
+        key = normalize(args[1])
 
-            if not decoded:
-                return bot.send_message(chat_id, "❌ Invalid Link")
+        matched = [
+            v for v in files_db.values()
+            if key in normalize(v["name"])
+        ]
 
-            keyword = normalize(decoded)
-
-            matched = []
-
-            for data in files_db.values():
-                name = normalize(data["name"])
-
-                if keyword in name or name in keyword:
-                    matched.append(data)
-
-            if not matched:
-                return bot.send_message(chat_id, "❌ Not Found")
-
-            matched.sort(key=lambda x: get_episode_number(x["name"]))
-
+        if matched:
             return fast_send(chat_id, matched)
 
-        # ---------------- NORMAL START ---------------- #
-        bot.send_message(chat_id,
-            f"""🎬 Anime Bot
+        return bot.send_message(chat_id, "❌ Not Found")
 
-👤 ID: {user_id}
-📦 Files: {len(files_db)}
+    bot.send_message(chat_id, "🎬 Send Anime Link")
 
-Send anime link to get episodes
-"""
-        )
+# ---------------- UPLOAD (ADMIN ONLY) ---------------- #
 
-    except Exception as e:
-        print("START ERROR:", e)
-
-# ---------------- UPLOAD ---------------- #
-
-@bot.message_handler(content_types=['document','video','audio'])
-def upload(message):
-    if message.from_user.id != ADMIN_ID:
+@bot.message_handler(content_types=["video", "document", "audio"])
+def upload(msg):
+    if msg.from_user.id != ADMIN_ID:
         return
 
-    caption = message.caption or "Anime"
+    caption = msg.caption or "Anime"
 
-    if message.document:
-        file_id = message.document.file_id
-        ftype = "document"
-        name = caption
+    file_id = None
+    ftype = None
 
-    elif message.video:
-        file_id = message.video.file_id
+    if msg.video:
+        file_id = msg.video.file_id
         ftype = "video"
-        name = caption
 
-    elif message.audio:
-        file_id = message.audio.file_id
+    elif msg.document:
+        file_id = msg.document.file_id
+        ftype = "document"
+
+    elif msg.audio:
+        file_id = msg.audio.file_id
         ftype = "audio"
-        name = caption
 
-    file_id_key = str(int(time.time()*1000))
+    # STEP 1 → POST TO UPLOAD CHANNEL
+    posted = bot.send_video(
+        UPLOAD_CHANNEL,
+        file_id,
+        caption=caption
+    ) if ftype == "video" else None
 
-    files_db[file_id_key] = {
-        "file_id": file_id,
+    # STEP 2 → SAVE MESSAGE ID FROM UPLOAD CHANNEL
+    files_db[str(time.time())] = {
+        "name": caption,
+        "channel": UPLOAD_CHANNEL,
+        "message_id": posted.message_id,
         "type": ftype,
-        "name": name,
         "caption": caption
     }
 
-    save_files()
+    save_db()
 
-    link = f"https://t.me/{bot.get_me().username}?start={encode_data(name)}"
-
-    bot.reply_to(message, f"✅ Saved\n\n🔗 {link}")
+    bot.reply_to(msg, "✅ Saved to Upload System")
 
 # ---------------- RUN ---------------- #
 
-print("BOT RUNNING...")
+print("Bot Running...")
 
 while True:
     try:
-        bot.infinity_polling(skip_pending=True)
+        bot.infinity_polling()
     except Exception as e:
-        print("BOT CRASH:", e)
-        time.sleep(5)
+        print("Error:", e)
+        time.sleep(3)
