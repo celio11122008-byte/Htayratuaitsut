@@ -7,7 +7,7 @@ import re
 
 # ---------------- CONFIG ---------------- #
 
-TOKEN = "8772869279:AAFzl85BO2442slN0fEc8P8S6YxjDl_mZN8"
+TOKEN = "8772869279:AAHo18Q2T_UohwQSE-wj1EXfpo66O2_Zk84"
 ADMIN_ID = 8758830915
 
 UPLOAD_CHANNEL = "tuukqutwulsiliysiluysgksilut"
