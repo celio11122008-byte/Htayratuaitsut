@@ -7,11 +7,11 @@ import re
 
 # ---------------- CONFIG ---------------- #
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "8772869279:AAHo18Q2T_UohwQSE-wj1EXfpo66O2_Zk84"
 ADMIN_ID = 8758830915
 
-UPLOAD_CHANNEL = "@Upload_Channel"
-MAIN_CHANNEL = "@Main_Channel"
+UPLOAD_CHANNEL = "@tuukqutwulsiliysiluysgksilut"
+MAIN_CHANNEL = "@Burmese_Anime"
 
 bot = telebot.TeleBot(TOKEN)
 
