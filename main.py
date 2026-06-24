@@ -6,7 +6,7 @@ import os
 import base64
 import time
 import threading
-
+import re
 
 # ---------------- CONFIG ---------------- #
 
@@ -205,9 +205,6 @@ def send_single_file(chat_id, data, sent_messages):
     except Exception as e:
         print(f"File Send Error: {e}")
 
-
-import re
-
 def get_episode_number(name):
     name = name.lower()
 
@@ -228,19 +225,25 @@ def get_episode_number(name):
 def fast_send(chat_id, files):
     sent_messages = []
 
-    # Episode အလိုက်စီ
+    # EP Number အလိုက်စီ
     files = sorted(
         files,
         key=lambda x: get_episode_number(x["name"])
     )
 
     for data in files:
-        send_single_file(
-            chat_id,
-            data,
-            sent_messages
-        )
-        time.sleep(0.5)  # Telegram send gap
+        try:
+            send_single_file(
+                chat_id,
+                data,
+                sent_messages
+            )
+
+            # Fast but keep order
+            time.sleep(0.03)
+
+        except Exception as e:
+            print(f"Send Error: {e}")
 
     try:
         warning = bot.send_message(
@@ -248,12 +251,20 @@ def fast_send(chat_id, files):
             f"""
 ✅ {len(sent_messages)} File Sent Successfully
 
-⚠️ 5 မိနစ်ကြာရင် Auto Delete ဖြစ်ပါမည်။
-📌 Saved Messages သို့ Forward လုပ်ထားပါ။
+🎬 Thank You For Using Our Anime Bot
+
+⚠️ 5 မိနစ်ကြာရင်
+(မူပိုင်ခွင့်ပြဿနာများကြောင့်)
+အလိုအလျောက် ဖျက်ပါမည်။
+
+📌 ကျေးဇူးပြု၍ File များကို
+Saved Messages သို့ Forward လုပ်ထားပါ။
 """
         )
 
-        sent_messages.append(warning.message_id)
+        sent_messages.append(
+            warning.message_id
+        )
 
         threading.Thread(
             target=auto_delete,
@@ -262,7 +273,9 @@ def fast_send(chat_id, files):
         ).start()
 
     except Exception as e:
-        print(f"Warning Error: {e}")
+        print(
+            f"Warning Error: {e}"
+        )
         
 # ---------------- START ---------------- #
 
