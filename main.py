@@ -206,11 +206,33 @@ def send_single_file(chat_id, data, sent_messages):
         print(f"File Send Error: {e}")
 
 
+import re
+
+def get_episode_number(name):
+    name = name.lower()
+
+    patterns = [
+        r'ep\s*(\d+)',
+        r'episode\s*(\d+)',
+        r'e(\d+)'
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, name)
+        if match:
+            return int(match.group(1))
+
+    return 999999
+
+
 def fast_send(chat_id, files):
     sent_messages = []
 
-    # Sort by name (EP 1, EP 2...)
-    files.sort(key=lambda x: x["name"].lower())
+    # Episode အလိုက်စီ
+    files = sorted(
+        files,
+        key=lambda x: get_episode_number(x["name"])
+    )
 
     for data in files:
         send_single_file(
@@ -218,6 +240,7 @@ def fast_send(chat_id, files):
             data,
             sent_messages
         )
+        time.sleep(0.5)  # Telegram send gap
 
     try:
         warning = bot.send_message(
@@ -225,14 +248,8 @@ def fast_send(chat_id, files):
             f"""
 ✅ {len(sent_messages)} File Sent Successfully
 
-🎬 Thank You For Using Our Anime Bot
-
-⚠️ 5 မိနစ်ကြာရင်
-(မူပိုင်ခွင့်ပြဿနာများကြောင့်)
-အလိုအလျောက် ဖျက်ပါမည်။
-
-📌 File များကို Saved Messages သို့
-Forward လုပ်ထားပါ။
+⚠️ 5 မိနစ်ကြာရင် Auto Delete ဖြစ်ပါမည်။
+📌 Saved Messages သို့ Forward လုပ်ထားပါ။
 """
         )
 
