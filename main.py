@@ -3,6 +3,7 @@ import json
 import os
 import time
 import threading
+import base64
 import re
 
 # ---------------- CONFIG ---------------- #
@@ -10,10 +11,10 @@ import re
 TOKEN = "8772869279:AAHo18Q2T_UohwQSE-wj1EXfpo66O2_Zk84"
 ADMIN_ID = 8758830915
 
-UPLOAD_CHANNEL = "tuukqutwulsiliysiluysgksilut"
+UPLOAD_CHANNEL = "@tuukqutwulsiliysiluysgksilut"
 MAIN_CHANNEL = "@Burmese_Anime"
 
-bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=30)
+bot = telebot.TeleBot(TOKEN)
 
 DB_FILE = "files.json"
 USERS_FILE = "users.json"
@@ -28,176 +29,162 @@ def load(file, default):
             return json.load(f)
     return default
 
-
 files_db = load(DB_FILE, {})
 users_db = set(load(USERS_FILE, []))
 
-
-def save_db():
+def save_files():
     with db_lock:
         with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(files_db, f, indent=4, ensure_ascii=False)
-
+            json.dump(files_db, f, indent=2, ensure_ascii=False)
 
 def save_users():
     with db_lock:
         with open(USERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(users_db), f, indent=4, ensure_ascii=False)
+            json.dump(list(users_db), f, indent=2, ensure_ascii=False)
 
 # ---------------- HELPERS ---------------- #
 
 def normalize(text):
     return str(text).lower().replace(" ", "").replace("-", "").replace("_", "")
 
+def encode(text):
+    return base64.urlsafe_b64encode(text.encode()).decode()
+
+def decode(text):
+    return base64.urlsafe_b64decode(text.encode()).decode()
 
 def get_ep(name):
-    m = re.search(r'(?:ep|episode|e)\s*(\d+)', name.lower())
-    return int(m.group(1)) if m else 999999
+    match = re.search(r"(?:ep|episode|e)\s*(\d+)", name.lower())
+    return int(match.group(1)) if match else 999999
 
-# ---------------- FORCE JOIN (MAIN CHANNEL) ---------------- #
+# ---------------- CHANNEL CHECK ---------------- #
 
 def is_joined(user_id):
     try:
         m = bot.get_chat_member(MAIN_CHANNEL, user_id)
-        return m.status in ["creator", "administrator", "member"]
+        return m.status in ["member", "creator", "administrator"]
     except:
         return False
 
+# ---------------- FAST SEND ---------------- #
 
-def join_msg(chat_id):
-    kb = telebot.types.InlineKeyboardMarkup()
-    kb.add(
-        telebot.types.InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{MAIN_CHANNEL.replace('@','')}")
-    )
+def send_file(chat_id, data):
+    if data["type"] == "video":
+        return bot.send_video(chat_id, data["file_id"], caption=data.get("caption", ""))
+    elif data["type"] == "document":
+        return bot.send_document(chat_id, data["file_id"], caption=data.get("caption", ""))
+    elif data["type"] == "audio":
+        return bot.send_audio(chat_id, data["file_id"], caption=data.get("caption", ""))
 
-    bot.send_message(
-        chat_id,
-        "❌ Please join channel first",
-        reply_markup=kb
-    )
+def fast_send(chat_id, files):
+    sent = []
 
-# ---------------- AUTO DELETE ---------------- #
+    # EP ORDER
+    files = sorted(files, key=lambda x: get_ep(x["name"]))
 
-def auto_delete(chat_id, ids):
+    for f in files:
+        try:
+            msg = send_file(chat_id, f)
+            sent.append(msg.message_id)
+        except:
+            pass
+
+    warn = bot.send_message(chat_id, f"✅ Sent {len(sent)} episodes\n⏳ Auto delete in 5 min")
+    sent.append(warn.message_id)
+
+    threading.Thread(target=auto_delete, args=(chat_id, sent), daemon=True).start()
+
+def auto_delete(chat_id, msg_ids):
     time.sleep(300)
-    for i in ids:
+    for i in msg_ids:
         try:
             bot.delete_message(chat_id, i)
         except:
             pass
 
-# ---------------- SEND SINGLE (COPY MESSAGE) ---------------- #
-
-def send_single(chat_id, data, sent):
-    try:
-        msg = bot.copy_message(
-            chat_id=chat_id,
-            from_chat_id=data["channel"],
-            message_id=data["message_id"]
-        )
-        sent.append(msg.message_id)
-
-    except Exception as e:
-        print("Copy Error:", e)
-
-# ---------------- FAST SEND ---------------- #
-
-def fast_send(chat_id, files):
-    sent = []
-
-    files = sorted(files, key=lambda x: get_ep(x["name"]))
-
-    for f in files:
-        send_single(chat_id, f, sent)
-
-    warn = bot.send_message(chat_id, f"✅ Sent {len(sent)} Episodes")
-    sent.append(warn.message_id)
-
-    threading.Thread(target=auto_delete, args=(chat_id, sent), daemon=True).start()
-
 # ---------------- START ---------------- #
 
-@bot.message_handler(commands=["start"])
-def start(msg):
-    uid = msg.from_user.id
-    chat_id = msg.chat.id
+@bot.message_handler(commands=['start'])
+def start(message):
+    uid = message.from_user.id
+    cid = message.chat.id
 
     if uid not in users_db:
         users_db.add(uid)
         save_users()
 
-    # FORCE JOIN MAIN CHANNEL
     if not is_joined(uid):
-        return join_msg(chat_id)
+        return bot.send_message(cid, "❌ Join channel first")
 
-    args = msg.text.split(maxsplit=1)
+    args = message.text.split(maxsplit=1)
 
     if len(args) > 1:
-        key = normalize(args[1])
+        try:
+            key = normalize(decode(args[1]))
+        except:
+            return bot.send_message(cid, "❌ Invalid link")
 
         matched = [
-            v for v in files_db.values()
-            if key in normalize(v["name"])
+            f for f in files_db.values()
+            if key in normalize(f["name"])
         ]
 
         if matched:
-            return fast_send(chat_id, matched)
+            return fast_send(cid, matched)
 
-        return bot.send_message(chat_id, "❌ Not Found")
+        return bot.send_message(cid, "❌ Not found")
 
-    bot.send_message(chat_id, "🎬 Send Anime Link")
+    bot.send_message(cid, "🎬 Anime Bot Ready")
 
-# ---------------- UPLOAD (ADMIN ONLY) ---------------- #
+# ---------------- UPLOAD ---------------- #
 
-@bot.message_handler(content_types=["video", "document", "audio"])
-def upload(msg):
-    if msg.from_user.id != ADMIN_ID:
+@bot.message_handler(content_types=['video', 'document', 'audio'])
+def upload(message):
+    if message.from_user.id != ADMIN_ID:
         return
 
-    caption = msg.caption or "Anime"
+    caption = message.caption or ""
 
-    file_id = None
-    ftype = None
-
-    if msg.video:
-        file_id = msg.video.file_id
+    if message.video:
+        file_id = message.video.file_id
         ftype = "video"
+        name = caption or "video"
 
-    elif msg.document:
-        file_id = msg.document.file_id
+    elif message.document:
+        file_id = message.document.file_id
         ftype = "document"
+        name = caption or message.document.file_name
 
-    elif msg.audio:
-        file_id = msg.audio.file_id
+    elif message.audio:
+        file_id = message.audio.file_id
         ftype = "audio"
+        name = caption or "audio"
 
-    # STEP 1 → POST TO UPLOAD CHANNEL
-    posted = bot.send_video(
-        UPLOAD_CHANNEL,
-        file_id,
-        caption=caption
-    ) if ftype == "video" else None
+    file_id_key = str(int(time.time()*1000))
 
-    # STEP 2 → SAVE MESSAGE ID FROM UPLOAD CHANNEL
-    files_db[str(time.time())] = {
-        "name": caption,
-        "channel": UPLOAD_CHANNEL,
-        "message_id": posted.message_id,
+    files_db[file_id_key] = {
+        "file_id": file_id,
+        "name": name,
         "type": ftype,
         "caption": caption
     }
 
-    save_db()
+    save_files()
 
-    bot.reply_to(msg, "✅ Saved to Upload System")
+    link = encode(normalize(name.split("ep")[0].strip()))
+    bot.send_message(message.chat.id, f"🔗 https://t.me/{bot.get_me().username}?start={link}")
 
-# ---------------- RUN ---------------- #
+# ---------------- STABLE RUN (FIX 409) ---------------- #
 
-print("Bot Running...")
+print("Bot running...")
 
 while True:
     try:
-        bot.infinity_polling()
+        bot.infinity_polling(
+            skip_pending=True,
+            timeout=20,
+            long_polling_timeout=20
+        )
     except Exception as e:
-        print("Error:", e)
-        time.sleep(3)
+        print("Restarting bot:", e)
+        time.sleep(5)
