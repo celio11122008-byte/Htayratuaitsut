@@ -1,281 +1,623 @@
 # ---------------- IMPORTS ---------------- #
+
 import telebot
 import json
 import os
 import base64
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
+
 
 # ---------------- CONFIG ---------------- #
+
 TOKEN = "8772869279:AAHuxhvC6kpeEjsjspUjtbBvIXkmp9Z54iQ"
 ADMIN_ID = 8758830915
 
-bot = telebot.TeleBot(TOKEN, threaded=False)
 
-# ---------------- FILES ---------------- #
+# ---------------- BOT ---------------- #
+
+bot = telebot.TeleBot(
+    TOKEN,
+    threaded=True,
+    num_threads=10
+)
+
+
+# ---------------- DATABASE FILES ---------------- #
+
 DB_FILE = "files.json"
-USERS_FILE = "users.json"
+USERS_DB_FILE = "users.json"
+
+
+# ---------------- CHANNEL ---------------- #
 
 CHANNEL_USERNAME = "@Burmese_Anime"
 CHANNEL_LINK = "https://t.me/Burmese_Anime"
 
-lock = threading.Lock()
+# ---------------- DATABASE ---------------- #
 
-# ---------------- LOAD ---------------- #
-def load(path, default):
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
+db_lock = threading.Lock()
+
+
+def load_json(file_path, default):
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            return default
+    except Exception as e:
+        print(f"Load Error ({file_path}): {e}")
+
     return default
 
-files_db = load(DB_FILE, {})
-users_db = set(load(USERS_FILE, []))
 
-# ---------------- SAVE ---------------- #
-def save(path, data):
-    tmp = path + ".tmp"
-    with lock:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, path)
+files_db = load_json(DB_FILE, {})
+
+users_data = load_json(USERS_DB_FILE, [])
+users_db = set(users_data)
+
+
+def save_db():
+    try:
+        with db_lock:
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                json.dump(
+                    files_db,
+                    f,
+                    indent=4,
+                    ensure_ascii=False
+                )
+    except Exception as e:
+        print(f"Save DB Error: {e}")
+
+
+def save_users():
+    try:
+        with db_lock:
+            with open(USERS_DB_FILE, "w", encoding="utf-8") as f:
+                json.dump(
+                    list(users_db),
+                    f,
+                    indent=4,
+                    ensure_ascii=False
+                )
+    except Exception as e:
+        print(f"Save Users Error: {e}")
 
 # ---------------- HELPERS ---------------- #
-def normalize(t):
-    return str(t or "").lower().strip().replace(" ", "").replace("-", "").replace("_", "")
 
-def encode(t):
-    return base64.urlsafe_b64encode(t.encode()).decode()
+def normalize(text):
+    if not text:
+        return ""
 
-def decode(t):
-    try:
-        return base64.urlsafe_b64decode(t + "==").decode()
-    except:
-        return None
-
-# ---------------- CHANNEL CHECK ---------------- #
-def is_joined(uid):
-    try:
-        m = bot.get_chat_member(CHANNEL_USERNAME, uid)
-        return m.status in ["member", "administrator", "creator"]
-    except:
-        return False
-
-def join_msg(cid):
-    kb = telebot.types.InlineKeyboardMarkup()
-    kb.add(telebot.types.InlineKeyboardButton("📢 Join Channel", url=CHANNEL_LINK))
-    bot.send_message(cid, "❌ Please join channel first", reply_markup=kb)
-
-# ---------------- FAST SEND ---------------- #
-def send_file(cid, data):
-    try:
-        cap = data.get("caption", "")
-
-        if data["type"] == "document":
-            m = bot.send_document(cid, data["file_id"], caption=cap)
-        elif data["type"] == "video":
-            m = bot.send_video(cid, data["file_id"], caption=cap, supports_streaming=True)
-        elif data["type"] == "audio":
-            m = bot.send_audio(cid, data["file_id"], caption=cap)
-        else:
-            return None
-
-        return m.message_id
-    except:
-        return None
-
-
-def fast_send(cid, files):
-    sent = []
-
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        results = ex.map(lambda f: send_file(cid, f), files)
-
-    for r in results:
-        if r:
-            sent.append(r)
-
-    bot.send_message(cid, f"✅ Sent {len(sent)} files")
-
-    def auto_del():
-        time.sleep(300)
-        for i in sent:
-            try:
-                bot.delete_message(cid, i)
-            except:
-                pass
-
-    threading.Thread(target=auto_del, daemon=True).start()
-
-# ---------------- START ---------------- #
-@bot.message_handler(commands=["start"])
-def start(m):
-    uid = m.from_user.id
-    cid = m.chat.id
-
-    if uid not in users_db:
-        users_db.add(uid)
-        save(USERS_FILE, list(users_db))
-
-    if not is_joined(uid):
-        return join_msg(cid)
-
-    args = m.text.split(maxsplit=1)
-
-    if len(args) > 1:
-        key = normalize(decode(args[1]) or "")
-
-        matched = [
-            v for v in files_db.values()
-            if key in normalize(v["name"])
-        ]
-
-        if matched:
-            return fast_send(cid, matched)
-
-        return bot.send_message(cid, "❌ Not found")
-
-    bot.send_message(cid,
-        f"🎬 Anime Bot\nFiles: {len(files_db)}"
+    return (
+        str(text)
+        .lower()
+        .strip()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("_", "")
     )
 
+
+def encode_data(text):
+    try:
+        return base64.urlsafe_b64encode(
+            text.encode("utf-8")
+        ).decode("utf-8")
+    except Exception as e:
+        print(f"Encode Error: {e}")
+        return ""
+
+
+def decode_data(text):
+    try:
+        return base64.urlsafe_b64decode(
+            text.encode("utf-8")
+        ).decode("utf-8")
+    except Exception as e:
+        print(f"Decode Error: {e}")
+        return None
+
+
+def is_joined(user_id):
+    try:
+        member = bot.get_chat_member(
+            CHANNEL_USERNAME,
+            user_id
+        )
+
+        return member.status in (
+            "creator",
+            "administrator",
+            "member"
+        )
+
+    except Exception as e:
+        print(f"Join Check Error: {e}")
+        return False
+
+
+def join_message(chat_id):
+    markup = telebot.types.InlineKeyboardMarkup()
+
+    markup.add(
+        telebot.types.InlineKeyboardButton(
+            "📢 Join Channel",
+            url=CHANNEL_LINK
+        )
+    )
+
+    bot.send_message(
+        chat_id,
+        """
+❌ Please Join Our Channel First
+
+📢 Join the channel using the button below.
+
+ပြီးမှ Bot ကို ပြန်အသုံးပြုပါ။
+""",
+        reply_markup=markup
+    )
+
+# ---------------- SEND FILES ---------------- #
+
+def auto_delete(chat_id, message_ids):
+    time.sleep(300)  # 5 Minutes
+
+    for msg_id in message_ids:
+        try:
+            bot.delete_message(chat_id, msg_id)
+        except Exception as e:
+            print(f"Delete Error: {e}")
+
+
+def send_single_file(chat_id, data, sent_messages):
+    try:
+        caption = data.get("caption", "")
+
+        if data["type"] == "document":
+            msg = bot.send_document(
+                chat_id,
+                data["file_id"],
+                caption=caption
+            )
+
+        elif data["type"] == "video":
+            msg = bot.send_video(
+                chat_id,
+                data["file_id"],
+                caption=caption,
+                supports_streaming=True
+            )
+
+        elif data["type"] == "audio":
+            msg = bot.send_audio(
+                chat_id,
+                data["file_id"],
+                caption=caption
+            )
+
+        else:
+            return
+
+        sent_messages.append(msg.message_id)
+
+    except Exception as e:
+        print(f"File Send Error: {e}")
+
+
+def fast_send(chat_id, files):
+    sent_messages = []
+    threads = []
+
+    for data in files:
+        thread = threading.Thread(
+            target=send_single_file,
+            args=(chat_id, data, sent_messages)
+        )
+
+        thread.start()
+        threads.append(thread)
+
+    # Wait until all files are sent
+    for thread in threads:
+        thread.join()
+
+    try:
+        warning = bot.send_message(
+            chat_id,
+            f"""
+✅ {len(sent_messages)} File Sent Successfully
+
+🎬 Thank You For Using Our Anime Bot
+
+⚠️ 5 မိနစ်ကြာရင်
+(မူပိုင်ခွင့်ပြဿနာများကြောင့်)
+အလိုအလျောက် ဖျက်ပါမည်။
+
+📌 ကျေးဇူးပြု၍ File များကို
+Saved Messages သို့ Forward လုပ်ထားပါ။
+"""
+        )
+
+        sent_messages.append(warning.message_id)
+
+        threading.Thread(
+            target=auto_delete,
+            args=(chat_id, sent_messages),
+            daemon=True
+        ).start()
+
+    except Exception as e:
+        print(f"Warning Message Error: {e}")
+        
+# ---------------- START ---------------- #
+
+@bot.message_handler(commands=['start'])
+def start(message):
+
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+
+        # Track new users only
+        if user_id not in users_db:
+            users_db.add(user_id)
+            save_users()
+
+        # Check channel join
+        if not is_joined(user_id):
+            join_message(chat_id)
+            return
+
+        args = message.text.split(maxsplit=1)
+
+        # Start with anime link
+        if len(args) > 1:
+            try:
+                keyword = normalize(decode_data(args[1]))
+            except Exception:
+                return bot.send_message(
+                    chat_id,
+                    "❌ Invalid Anime Link"
+                )
+
+            matched_files = [
+                data for data in files_db.values()
+                if keyword in normalize(data["name"])
+                or normalize(data["name"]) in keyword
+            ]
+
+            if matched_files:
+                return fast_send(chat_id, matched_files)
+
+            return bot.send_message(
+                chat_id,
+                "❌ Anime Not Found"
+            )
+
+        # Normal start message
+        bot.send_message(
+            chat_id,
+            f"""
+🎬 Welcome To Anime Bot
+
+👤 User ID: {user_id}
+
+📚 Available Anime:
+{len(files_db)} Files
+
+📢 Join Channel:
+{CHANNEL_LINK}
+
+🔍 Send Anime Link To Watch Episodes
+"""
+        )
+
+    except Exception as e:
+        print(f"Start Error: {e}")
+        bot.send_message(
+            message.chat.id,
+            "❌ Something went wrong. Please try again."
+        )
+
 # ---------------- UPLOAD ---------------- #
-@bot.message_handler(content_types=["document", "video", "audio"])
-def upload(m):
 
-    if m.from_user.id != ADMIN_ID:
-        return bot.reply_to(m, "Admin only")
+@bot.message_handler(content_types=['document', 'video', 'audio'])
+def upload_file(message):
 
-    cap = m.caption or ""
+    if message.from_user.id != ADMIN_ID:
+        return bot.reply_to(message, "❌ Only admin can upload.")
 
-    if m.document:
-        fid = m.document.file_id
-        name = cap or m.document.file_name
-        t = "document"
+    try:
+        caption_text = message.caption or ""
 
-    elif m.video:
-        fid = m.video.file_id
-        name = cap or "video"
-        t = "video"
+        if message.document:
+            file_id = message.document.file_id
+            file_name = caption_text or message.document.file_name
+            file_type = "document"
 
-    elif m.audio:
-        fid = m.audio.file_id
-        name = cap or "audio"
-        t = "audio"
-    else:
-        return
+        elif message.video:
+            file_id = message.video.file_id
+            file_name = caption_text or "AnimeVideo"
+            file_type = "video"
 
-    for v in files_db.values():
-        if v["file_id"] == fid:
-            return bot.reply_to(m, "Already exists")
+        elif message.audio:
+            file_id = message.audio.file_id
+            file_name = caption_text or "AnimeAudio"
+            file_type = "audio"
 
-    key = str(int(time.time() * 1000))
+        else:
+            return
 
-    files_db[key] = {
-        "file_id": fid,
-        "name": name,
-        "type": t,
-        "caption": cap,
-        "time": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
+        # Duplicate Check
+        for data in files_db.values():
+            if data["file_id"] == file_id:
+                return bot.reply_to(
+                    message,
+                    "⚠️ This file already exists in database."
+                )
 
-    save(DB_FILE, files_db)
+        # Unique ID
+        file_unique = str(int(time.time() * 1000))
 
-    link = f"https://t.me/{bot.get_me().username}?start={encode(normalize(name))}"
+        files_db[file_unique] = {
+            "file_id": file_id,
+            "name": file_name,
+            "type": file_type,
+            "caption": caption_text,
+            "added_time": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
 
-    bot.reply_to(m, f"Saved ✅\n{name}")
-    bot.send_message(m.chat.id, f"🔗 {link}")
+        save_db()
+
+        bot_username = bot.get_me().username
+
+        anime_only = file_name
+        if "ep" in anime_only.lower():
+            anime_only = anime_only.lower().split("ep")[0].strip()
+
+        encoded = encode_data(normalize(anime_only))
+        link = f"https://t.me/{bot_username}?start={encoded}"
+
+        bot.reply_to(
+            message,
+            f"""
+✅ ANIME SAVED SUCCESSFULLY
+
+🎬 Name: {file_name}
+📂 Type: {file_type}
+🆔 ID: {file_unique}
+
+📊 Total Files: {len(files_db)}
+"""
+        )
+
+        bot.send_message(
+            message.chat.id,
+            f"""
+🔗 Anime Link
+
+{link}
+"""
+        )
+
+    except Exception as e:
+        bot.reply_to(
+            message,
+            f"❌ Upload Failed\n\n{e}"
+        )
 
 # ---------------- DELETE ---------------- #
-@bot.message_handler(commands=["delete"])
-def delete(m):
-    if m.from_user.id != ADMIN_ID:
+
+@bot.message_handler(commands=['delete'])
+def delete_file(message):
+
+    if message.from_user.id != ADMIN_ID:
         return
 
-    args = m.text.split(maxsplit=1)
+    args = message.text.split(maxsplit=1)
+
     if len(args) < 2:
-        return
+        return bot.reply_to(
+            message,
+            "❌ Usage:\n/delete FILE_ID"
+        )
 
-    key = args[1]
+    file_key = args[1].strip()
 
-    if key in files_db:
-        del files_db[key]
-        save(DB_FILE, files_db)
-        bot.reply_to(m, "Deleted")
-    else:
-        bot.reply_to(m, "Not found")
+    if file_key not in files_db:
+        return bot.reply_to(
+            message,
+            "❌ File ID Not Found."
+        )
 
-# ---------------- DELETE ALL ---------------- #
-@bot.message_handler(commands=["deleteall"])
-def delete_all(m):
-    if m.from_user.id != ADMIN_ID:
-        return
+    file_name = files_db[file_key]["name"]
 
-    files_db.clear()
-    save(DB_FILE, files_db)
+    del files_db[file_key]
+    save_db()
 
-    bot.reply_to(m, "All deleted")
-
-# ---------------- DELETE BY NAME ---------------- #
-@bot.message_handler(commands=["delname"])
-def delname(m):
-    if m.from_user.id != ADMIN_ID:
-        return
-
-    name = normalize(m.text.split(maxsplit=1)[1])
-
-    removed = 0
-    for k in list(files_db.keys()):
-        if name in normalize(files_db[k]["name"]):
-            del files_db[k]
-            removed += 1
-
-    save(DB_FILE, files_db)
-    bot.reply_to(m, f"Deleted {removed}")
-
-# ---------------- STATS ---------------- #
-@bot.message_handler(commands=["stats"])
-def stats(m):
-    if m.from_user.id != ADMIN_ID:
-        return
-
-    bot.send_message(m.chat.id,
+    bot.reply_to(
+        message,
         f"""
-📊 Stats
+✅ File Deleted Successfully
 
-👥 Users: {len(users_db)}
-🎬 Files: {len(files_db)}
+🎬 Name: {file_name}
+🆔 ID: {file_key}
 """
     )
 
-# ---------------- BACKUP ---------------- #
-@bot.message_handler(commands=["backup"])
-def backup(m):
-    if m.from_user.id != ADMIN_ID:
+
+@bot.message_handler(commands=['deleteall'])
+def delete_all(message):
+
+    if message.from_user.id != ADMIN_ID:
         return
 
-    data = {
-        "files": files_db,
-        "users": list(users_db)
-    }
+    total_files = len(files_db)
 
-    with open("backup.json", "w") as f:
-        json.dump(data, f, indent=2)
+    if total_files == 0:
+        return bot.reply_to(
+            message,
+            "❌ Database is already empty."
+        )
 
-    with open("backup.json", "rb") as f:
-        bot.send_document(m.chat.id, f)
+    files_db.clear()
+    save_db()
 
-    os.remove("backup.json")
+    bot.reply_to(
+        message,
+        f"""
+🗑 All Files Deleted Successfully
+
+🎬 Total Deleted: {total_files}
+"""
+    )
+
+# ---------------- DEL BY NAME ---------------- #
+
+@bot.message_handler(commands=['delname'])
+def delete_by_name(message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    args = message.text.split(maxsplit=1)
+
+    if len(args) < 2:
+        return bot.reply_to(
+            message,
+            "❌ Usage:\n/delname anime name"
+        )
+
+    anime_name = normalize(args[1])
+
+    deleted = 0
+    deleted_names = []
+
+    for file_id, data in list(files_db.items()):
+        if anime_name in normalize(data["name"]):
+            deleted_names.append(data["name"])
+            del files_db[file_id]
+            deleted += 1
+
+    if deleted:
+        save_db()
+
+        preview = "\n".join(
+            f"• {name}" for name in deleted_names[:10]
+        )
+
+        more = ""
+        if deleted > 10:
+            more = f"\n...and {deleted - 10} more"
+
+        bot.reply_to(
+            message,
+            f"""
+✅ Deleted Successfully
+
+🗑 Deleted Files: {deleted}
+
+📂 Removed:
+{preview}{more}
+"""
+        )
+
+    else:
+        bot.reply_to(
+            message,
+            "❌ Anime Not Found"
+        )
+
+# ---------------- BACKUP ---------------- #
+
+@bot.message_handler(commands=['backup'])
+def backup_files(message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    try:
+        backup_data = {
+            "files": files_db,
+            "users": list(users_db),
+            "total_files": len(files_db),
+            "total_users": len(users_db),
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        backup_file = "anime_bot_backup.json"
+
+        with open(backup_file, "w", encoding="utf-8") as f:
+            json.dump(
+                backup_data,
+                f,
+                indent=4,
+                ensure_ascii=False
+            )
+
+        with open(backup_file, "rb") as f:
+            bot.send_document(
+                message.chat.id,
+                f,
+                caption=f"""
+📦 Backup Completed ✅
+
+👥 Users: {len(users_db)}
+🎬 Files: {len(files_db)}
+🕒 Time: {backup_data["created_at"]}
+"""
+            )
+
+        os.remove(backup_file)
+
+    except Exception as e:
+        bot.send_message(
+            message.chat.id,
+            f"❌ Backup Failed\n\n{e}"
+        )
+
+# ---------------- STATS ---------------- #
+
+@bot.message_handler(commands=['stats'])
+def stats(message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    files_size = round(
+        os.path.getsize(DB_FILE) / 1024,
+        2
+    ) if os.path.exists(DB_FILE) else 0
+
+
+    bot.send_message(
+        message.chat.id,
+        f"""
+📊 Bot Statistics
+
+👥 Total Users: {len(users_db)}
+🎬 Total Files: {len(files_db)}
+
+💾 Database Size: {files_size} KB
+
+🤖 Bot Status: Online ✅
+"""
+    )
 
 # ---------------- RUN ---------------- #
-print("BOT RUNNING...")
+
+print("🤖 Anime Bot Running...")
 
 while True:
     try:
-        bot.infinity_polling(skip_pending=True)
+        bot.infinity_polling(
+            skip_pending=True,
+            timeout=30,
+            long_polling_timeout=30
+        )
+
     except Exception as e:
-        print("ERROR:", e)
-        time.sleep(3)
+        print(f"Bot Error: {e}")
+        time.sleep(5)
