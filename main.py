@@ -1,9 +1,8 @@
 import telebot
 import json
 import os
+import base64
 import time
-import re
-import threading
 
 # ---------------- CONFIG ---------------- #
 
@@ -28,6 +27,19 @@ def save_db():
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(files_db, f, indent=4, ensure_ascii=False)
 
+# ---------------- ENCODE / DECODE ---------------- #
+
+def encode(text):
+    return base64.urlsafe_b64encode(
+        text.encode("utf-8")
+    ).decode("utf-8")
+
+
+def decode(text):
+    return base64.urlsafe_b64decode(
+        text.encode("utf-8")
+    ).decode("utf-8")
+
 # ---------------- NORMALIZE ---------------- #
 
 def normalize(text):
@@ -37,27 +49,7 @@ def normalize(text):
         .replace("_", "")\
         .replace("ep", "")
 
-# ---------------- SORT EP ---------------- #
-
-def extract_ep(text):
-    m = re.search(r'(\d+)', text)
-    return int(m.group()) if m else 0
-
-
-def sort_eps(episodes):
-    return sorted(episodes, key=lambda x: extract_ep(x.get("caption", "")))
-
-# ---------------- AUTO DELETE ---------------- #
-
-def auto_delete(chat_id, msg_ids, delay):
-    time.sleep(delay)
-    for mid in msg_ids:
-        try:
-            bot.delete_message(chat_id, mid)
-        except:
-            pass
-
-# ---------------- SEND ---------------- #
+# ---------------- SEND ALL ---------------- #
 
 def send_one(chat_id, data, sent):
     try:
@@ -73,51 +65,41 @@ def send_one(chat_id, data, sent):
 
 
 def send_all(chat_id, episodes):
-
-    episodes = sort_eps(episodes)
-
     sent = []
 
     for ep in episodes:
         send_one(chat_id, ep, sent)
 
-    final = bot.send_message(
+    bot.send_message(
         chat_id,
         f"✅ ALL EP SENT ({len(sent)})"
     )
 
-    sent.append(final.message_id)
-
-    threading.Thread(
-        target=auto_delete,
-        args=(chat_id, sent, 300),
-        daemon=True
-    ).start()
-
-# ---------------- LINK CLICK HANDLER ---------------- #
+# ---------------- START (DECODE LINK CLICK) ---------------- #
 
 @bot.message_handler(commands=['start'])
 def start(message):
 
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
     args = message.text.split(maxsplit=1)
 
-    # No link click
     if len(args) < 2:
-        return bot.send_message(chat_id,
-            "🎬 Send Anime Link or Name"
+        return bot.send_message(message.chat.id,
+            "🎬 Send Anime Name or Link"
         )
 
-    # LINK CLICK PAYLOAD
-    key = normalize(args[1])
+    try:
+        # decode link payload
+        key = decode(args[1])
+        key = normalize(key)
+
+    except:
+        return bot.send_message(message.chat.id, "❌ Invalid Link")
 
     if key in files_db:
         episodes = files_db[key]["episodes"]
-        return send_all(chat_id, episodes)
+        return send_all(message.chat.id, episodes)
 
-    bot.send_message(chat_id, "❌ Anime Not Found")
+    bot.send_message(message.chat.id, "❌ Anime Not Found")
 
 # ---------------- UPLOAD (ADMIN) ---------------- #
 
@@ -144,6 +126,14 @@ def upload(message):
 
     save_db()
 
+    # ---------------- GENERATE ENCODE LINK ---------------- #
+
+    bot_username = bot.get_me().username
+
+    encoded_key = encode(key)
+
+    link = f"https://t.me/{bot_username}?start={encoded_key}"
+
     bot.reply_to(message,
         f"""
 ✅ SAVED
@@ -153,12 +143,9 @@ def upload(message):
 """
     )
 
-    # 🔗 AUTO LINK GENERATE
-    bot_username = bot.get_me().username
-    link = f"https://t.me/{bot_username}?start={key}"
-
-    bot.send_message(message.chat.id,
-        f"🔗 LINK:\n{link}"
+    bot.send_message(
+        message.chat.id,
+        f"🔗 ENCODE LINK:\n{link}"
     )
 
 # ---------------- DELETE ---------------- #
@@ -183,29 +170,9 @@ def delete(message):
     else:
         bot.reply_to(message, "❌ Not Found")
 
-# ---------------- STATS ---------------- #
-
-@bot.message_handler(commands=['stats'])
-def stats(message):
-
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    total_anime = len(files_db)
-    total_eps = sum(len(v["episodes"]) for v in files_db.values())
-
-    bot.send_message(message.chat.id,
-        f"""
-📊 BOT STATS
-
-🎬 Anime: {total_anime}
-📦 Episodes: {total_eps}
-"""
-    )
-
 # ---------------- RUN ---------------- #
 
-print("🚀 LINK CLICK ANIME BOT RUNNING...")
+print("🚀 ENCODE LINK BOT RUNNING...")
 
 while True:
     try:
