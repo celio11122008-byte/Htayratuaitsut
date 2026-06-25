@@ -2,8 +2,8 @@ import telebot
 import json
 import os
 import time
+import re
 import threading
-import hashlib
 
 # ---------------- CONFIG ---------------- #
 
@@ -15,36 +15,52 @@ bot = telebot.TeleBot(TOKEN, threaded=True, num_threads=10)
 # ---------------- DB ---------------- #
 
 DB_FILE = "files.json"
-USERS_FILE = "users.json"
 
-lock = threading.Lock()
-
-def load(file, default):
-    if os.path.exists(file):
-        with open(file, "r", encoding="utf-8") as f:
+def load_db():
+    if os.path.exists(DB_FILE):
+        with open(DB_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return default
+    return {}
+
+files_db = load_db()
+
+def save_db():
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(files_db, f, indent=4, ensure_ascii=False)
+
+# ---------------- SMART NORMALIZE ---------------- #
+
+def normalize(text):
+    return str(text).lower()\
+        .replace(" ", "")\
+        .replace("-", "")\
+        .replace("_", "")\
+        .replace("ep", "")
+
+def smart_match(q, k):
+    return q in k or k in q
+
+# ---------------- EP SORT ---------------- #
+
+def extract_ep(text):
+    m = re.search(r'(\d+)', text)
+    return int(m.group()) if m else 0
 
 
-files_db = load(DB_FILE, {})
-users_db = set(load(USERS_FILE, []))
+def sort_eps(episodes):
+    return sorted(episodes, key=lambda x: extract_ep(x.get("caption", "")))
 
+# ---------------- AUTO DELETE ---------------- #
 
-def save_files():
-    with lock:
-        json.dump(files_db, open(DB_FILE, "w", encoding="utf-8"), indent=4, ensure_ascii=False)
+def auto_delete(chat_id, msg_ids, delay):
+    time.sleep(delay)
+    for mid in msg_ids:
+        try:
+            bot.delete_message(chat_id, mid)
+        except:
+            pass
 
-
-def save_users():
-    with lock:
-        json.dump(list(users_db), open(USERS_FILE, "w", encoding="utf-8"), indent=4, ensure_ascii=False)
-
-# ---------------- SHORT CODE ---------------- #
-
-def short_code(text):
-    return hashlib.md5(text.encode()).hexdigest()[:7]
-
-# ---------------- SEND COPY ---------------- #
+# ---------------- COPY SEND ---------------- #
 
 def send_one(chat_id, data, sent):
     try:
@@ -58,105 +74,99 @@ def send_one(chat_id, data, sent):
     except:
         pass
 
+# ---------------- SMART SEND ENGINE ---------------- #
 
-def send_all(chat_id, files):
+def send_all(chat_id, episodes):
+
+    episodes = sort_eps(episodes)
+
     sent = []
-    threads = []
 
-    for f in files:
-        t = threading.Thread(target=send_one, args=(chat_id, f, sent))
-        t.start()
-        threads.append(t)
+    for ep in episodes:
+        send_one(chat_id, ep, sent)
 
-    for t in threads:
-        t.join()
-
-    bot.send_message(
+    # CLEAN FINAL MESSAGE ONLY
+    final = bot.send_message(
         chat_id,
-        f"""
-✅ ALL EPISODES SENT SUCCESSFULLY
-
-📦 Total Sent: {len(sent)}
-
-⚠️ Auto delete in 5 min
-Saved Messages ထဲ forward လုပ်ပါ
-"""
+        f"✅ ALL EP SENT ({len(sent)})"
     )
 
+    sent.append(final.message_id)
+
+    # AUTO DELETE TIME ADJUST
+    if len(sent) <= 5:
+        delay = 120
+    elif len(sent) <= 20:
+        delay = 300
+    else:
+        delay = 600
+
+    threading.Thread(
+        target=auto_delete,
+        args=(chat_id, sent, delay),
+        daemon=True
+    ).start()
 
 # ---------------- START ---------------- #
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    users_db.add(user_id)
-    save_users()
 
     args = message.text.split(maxsplit=1)
 
-    if len(args) > 1:
-        code = args[1]
+    if len(args) < 2:
+        return bot.send_message(message.chat.id,
+            "🎬 Send Anime Name\nExample: /start Naruto"
+        )
 
-        matched = [f for f in files_db.values() if f.get("code") == code]
+    query = normalize(args[1])
 
-        if matched:
-            return send_all(chat_id, matched)
+    matched = None
 
-        return bot.send_message(chat_id, "❌ Not found")
+    for key, data in files_db.items():
+        if smart_match(query, key):
+            matched = data["episodes"]
+            break
 
-    bot.send_message(chat_id,
-        f"""
-🎬 Anime Bot Ready
-📦 Files: {len(files_db)}
-"""
-    )
+    if matched:
+        return send_all(message.chat.id, matched)
 
+    bot.send_message(message.chat.id, "❌ Not Found")
 
-# ---------------- UPLOAD (ADMIN) ---------------- #
+# ---------------- UPLOAD ---------------- #
 
-@bot.message_handler(content_types=['document', 'video', 'audio'])
+@bot.message_handler(content_types=['video', 'document', 'audio'])
 def upload(message):
+
     if message.from_user.id != ADMIN_ID:
         return
 
-    caption = message.caption or "Anime"
+    name = message.caption or "Unknown Anime"
+    key = normalize(name)
 
-    code = short_code(caption)
+    if key not in files_db:
+        files_db[key] = {
+            "anime": name,
+            "episodes": []
+        }
 
-    file_id = str(int(time.time() * 1000))
-
-    files_db[file_id] = {
+    files_db[key]["episodes"].append({
         "chat_id": message.chat.id,
         "message_id": message.message_id,
-        "name": caption,
-        "caption": caption,
-        "code": code,
-        "time": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
+        "caption": name
+    })
 
-    save_files()
+    save_db()
 
     bot.reply_to(message,
-        f"""
-✅ SAVED
-
-🎬 {caption}
-🔑 Code: {code}
-"""
+        f"✅ Saved\n🎬 {name}\n📦 EP: {len(files_db[key]['episodes'])}"
     )
-
-    bot.send_message(
-        message.chat.id,
-        f"🔗 Link:\nhttps://t.me/{bot.get_me().username}?start={code}"
-    )
-
 
 # ---------------- DELETE ---------------- #
 
 @bot.message_handler(commands=['delete'])
 def delete(message):
+
     if message.from_user.id != ADMIN_ID:
         return
 
@@ -165,34 +175,40 @@ def delete(message):
     if len(args) < 2:
         return
 
-    fid = args[1]
+    key = normalize(args[1])
 
-    if fid in files_db:
-        del files_db[fid]
-        save_files()
+    if key in files_db:
+        del files_db[key]
+        save_db()
         bot.reply_to(message, "✅ Deleted")
-
+    else:
+        bot.reply_to(message, "❌ Not Found")
 
 # ---------------- STATS ---------------- #
 
 @bot.message_handler(commands=['stats'])
 def stats(message):
+
     if message.from_user.id != ADMIN_ID:
         return
+
+    total_anime = len(files_db)
+    total_eps = sum(len(v["episodes"]) for v in files_db.values())
 
     bot.send_message(message.chat.id,
         f"""
 📊 BOT STATS
 
-👥 Users: {len(users_db)}
-🎬 Files: {len(files_db)}
+🎬 Anime: {total_anime}
+📦 Episodes: {total_eps}
+
+⚡ Mode: SMART CLEAN
 """
     )
 
-
 # ---------------- RUN ---------------- #
 
-print("Bot Running...")
+print("🚀 CLEAN SMART BOT RUNNING...")
 
 while True:
     try:
