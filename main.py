@@ -28,7 +28,7 @@ def save_db():
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(files_db, f, indent=4, ensure_ascii=False)
 
-# ---------------- SMART NORMALIZE ---------------- #
+# ---------------- NORMALIZE ---------------- #
 
 def normalize(text):
     return str(text).lower()\
@@ -37,10 +37,7 @@ def normalize(text):
         .replace("_", "")\
         .replace("ep", "")
 
-def smart_match(q, k):
-    return q in k or k in q
-
-# ---------------- EP SORT ---------------- #
+# ---------------- SORT EP ---------------- #
 
 def extract_ep(text):
     m = re.search(r'(\d+)', text)
@@ -60,7 +57,7 @@ def auto_delete(chat_id, msg_ids, delay):
         except:
             pass
 
-# ---------------- COPY SEND ---------------- #
+# ---------------- SEND ---------------- #
 
 def send_one(chat_id, data, sent):
     try:
@@ -74,7 +71,6 @@ def send_one(chat_id, data, sent):
     except:
         pass
 
-# ---------------- SMART SEND ENGINE ---------------- #
 
 def send_all(chat_id, episodes):
 
@@ -85,7 +81,6 @@ def send_all(chat_id, episodes):
     for ep in episodes:
         send_one(chat_id, ep, sent)
 
-    # CLEAN FINAL MESSAGE ONLY
     final = bot.send_message(
         chat_id,
         f"✅ ALL EP SENT ({len(sent)})"
@@ -93,47 +88,38 @@ def send_all(chat_id, episodes):
 
     sent.append(final.message_id)
 
-    # AUTO DELETE TIME ADJUST
-    if len(sent) <= 5:
-        delay = 120
-    elif len(sent) <= 20:
-        delay = 300
-    else:
-        delay = 600
-
     threading.Thread(
         target=auto_delete,
-        args=(chat_id, sent, delay),
+        args=(chat_id, sent, 300),
         daemon=True
     ).start()
 
-# ---------------- START ---------------- #
+# ---------------- LINK CLICK HANDLER ---------------- #
 
 @bot.message_handler(commands=['start'])
 def start(message):
 
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
     args = message.text.split(maxsplit=1)
 
+    # No link click
     if len(args) < 2:
-        return bot.send_message(message.chat.id,
-            "🎬 Send Anime Name\nExample: /start Naruto"
+        return bot.send_message(chat_id,
+            "🎬 Send Anime Link or Name"
         )
 
-    query = normalize(args[1])
+    # LINK CLICK PAYLOAD
+    key = normalize(args[1])
 
-    matched = None
+    if key in files_db:
+        episodes = files_db[key]["episodes"]
+        return send_all(chat_id, episodes)
 
-    for key, data in files_db.items():
-        if smart_match(query, key):
-            matched = data["episodes"]
-            break
+    bot.send_message(chat_id, "❌ Anime Not Found")
 
-    if matched:
-        return send_all(message.chat.id, matched)
-
-    bot.send_message(message.chat.id, "❌ Not Found")
-
-# ---------------- UPLOAD ---------------- #
+# ---------------- UPLOAD (ADMIN) ---------------- #
 
 @bot.message_handler(content_types=['video', 'document', 'audio'])
 def upload(message):
@@ -159,7 +145,20 @@ def upload(message):
     save_db()
 
     bot.reply_to(message,
-        f"✅ Saved\n🎬 {name}\n📦 EP: {len(files_db[key]['episodes'])}"
+        f"""
+✅ SAVED
+
+🎬 {name}
+📦 EP: {len(files_db[key]['episodes'])}
+"""
+    )
+
+    # 🔗 AUTO LINK GENERATE
+    bot_username = bot.get_me().username
+    link = f"https://t.me/{bot_username}?start={key}"
+
+    bot.send_message(message.chat.id,
+        f"🔗 LINK:\n{link}"
     )
 
 # ---------------- DELETE ---------------- #
@@ -201,14 +200,12 @@ def stats(message):
 
 🎬 Anime: {total_anime}
 📦 Episodes: {total_eps}
-
-⚡ Mode: SMART CLEAN
 """
     )
 
 # ---------------- RUN ---------------- #
 
-print("🚀 CLEAN SMART BOT RUNNING...")
+print("🚀 LINK CLICK ANIME BOT RUNNING...")
 
 while True:
     try:
